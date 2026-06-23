@@ -44,6 +44,7 @@ docker compose up -d
 
 wait_for_url "Nessie" "http://localhost:19120/api/v2/config"
 wait_for_url "Trino HTTP" "http://localhost:8080/v1/info"
+wait_for_url "SQLPad" "http://localhost:3010"
 wait_for_trino_cli
 
 echo "Creating Iceberg schema/table and inserting rows..."
