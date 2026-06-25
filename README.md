@@ -195,6 +195,42 @@ flink-taskmanager  | +I[200, new_event, 2026-06-24T10:30:00]
 
 ---
 
+### 6b. Process only incremental diff between two snapshots (Flink batch)
+
+This pattern is closest to the "Iceberg like Git commit diff" workflow:
+
+1. pick a start snapshot (`X`)
+2. let new data arrive (snapshot `Y`)
+3. run a Flink batch read only for rows added between `X` and `Y`
+
+```bash
+# 1) Capture snapshot IDs from Trino
+START_SNAPSHOT_ID=$(docker compose exec -T trino trino --execute \
+  "SELECT snapshot_id FROM iceberg.demo.\"events\$history\" ORDER BY made_current_at ASC LIMIT 1" \
+  | awk 'NF{last=$1} END{print last}')
+
+END_SNAPSHOT_ID=$(docker compose exec -T trino trino --execute \
+  "SELECT snapshot_id FROM iceberg.demo.\"events\$snapshots\" ORDER BY committed_at DESC LIMIT 1" \
+  | awk 'NF{last=$1} END{print last}')
+
+echo "START=${START_SNAPSHOT_ID} END=${END_SNAPSHOT_ID}"
+
+# 2) Render a temp SQL job with real snapshot IDs
+sed -e "s/<START_SNAPSHOT_ID>/${START_SNAPSHOT_ID}/g" \
+    -e "s/<END_SNAPSHOT_ID>/${END_SNAPSHOT_ID}/g" \
+    config/flink/jobs/iceberg-incremental-diff.sql \
+  > /tmp/iceberg-incremental-diff.sql
+
+# 3) Copy SQL into the running Flink JobManager and run it
+# (the jobs folder is mounted read-only, so we use /tmp in container)
+docker cp /tmp/iceberg-incremental-diff.sql flink-jobmanager:/tmp/iceberg-incremental-diff.sql
+./scripts/run-flink-iceberg-job.sh /tmp/iceberg-incremental-diff.sql
+```
+
+The output appears in Flink TaskManager logs through the `print` connector.
+
+---
+
 ### 7. Check Flink checkpoints in MinIO
 
 ```bash
@@ -230,4 +266,3 @@ Expected output ends with: `Smoke test passed.`
 ## Reference
 
 - https://aws.amazon.com/blogs/big-data/building-unified-data-pipelines-with-apache-iceberg-and-apache-flink/
-

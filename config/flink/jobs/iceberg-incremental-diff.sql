@@ -1,5 +1,5 @@
--- Flink SQL job: continuously read incremental appends from Iceberg.
--- This behaves like "process only new commits" from the current snapshot forward.
+-- Flink SQL job: one-time incremental read between two Iceberg snapshots.
+-- Replace <START_SNAPSHOT_ID> and <END_SNAPSHOT_ID> before running.
 
 CREATE CATALOG nessie_catalog WITH (
   'type' = 'iceberg',
@@ -19,7 +19,7 @@ USE CATALOG nessie_catalog;
 CREATE DATABASE IF NOT EXISTS demo;
 USE demo;
 
-CREATE TEMPORARY TABLE events_print (
+CREATE TEMPORARY TABLE events_diff_print (
   id BIGINT,
   event_type STRING,
   created_at TIMESTAMP(6)
@@ -27,8 +27,11 @@ CREATE TEMPORARY TABLE events_print (
   'connector' = 'print'
 );
 
-SET 'execution.runtime-mode' = 'streaming';
+SET 'execution.runtime-mode' = 'batch';
 
-INSERT INTO events_print
+INSERT INTO events_diff_print
 SELECT id, event_type, created_at
-FROM events /*+ OPTIONS('streaming'='true', 'monitor-interval'='10s') */;
+FROM events /*+ OPTIONS(
+  'start-snapshot-id'='<START_SNAPSHOT_ID>',
+  'end-snapshot-id'='<END_SNAPSHOT_ID>'
+) */;
