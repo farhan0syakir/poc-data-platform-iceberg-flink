@@ -156,50 +156,42 @@ docker compose exec -T trino trino --execute \
 
 ---
 
-### 6. Run Flink SQL streaming job (datagen → print)
+### 6. Run Flink SQL streaming job — Iceberg incremental source
+
+This is the **core of the AWS blog architecture**: Flink reads the Iceberg table as a streaming source using incremental snapshot reads. Every time you insert rows via Trino, Flink detects the new snapshot and prints the new rows in real time.
+
+**Start the stack** (first run downloads ~70 MB of Iceberg JARs once):
 
 ```bash
-docker compose exec -it flink-jobmanager /opt/flink/bin/sql-client.sh
+docker compose up -d
 ```
 
-Paste this SQL and press **Enter** to run:
-
-```sql
-SET 'execution.checkpointing.interval' = '10 s';
-
-CREATE TEMPORARY TABLE src (
-  id     BIGINT,
-  ts     TIMESTAMP(3),
-  WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
-) WITH (
-  'connector'        = 'datagen',
-  'rows-per-second'  = '5',
-  'fields.id.kind'   = 'sequence',
-  'fields.id.start'  = '1',
-  'fields.id.end'    = '1000000'
-);
-
-CREATE TEMPORARY TABLE sink (
-  window_start TIMESTAMP(3),
-  window_end   TIMESTAMP(3),
-  cnt          BIGINT
-) WITH (
-  'connector' = 'print'
-);
-
-INSERT INTO sink
-SELECT window_start, window_end, COUNT(*) AS cnt
-FROM TABLE(
-  TUMBLE(TABLE src, DESCRIPTOR(ts), INTERVAL '10' SECOND)
-)
-GROUP BY window_start, window_end;
-```
-
-Open `http://localhost:8081` to watch the job running, and check task output with:
+**Submit the job:**
 
 ```bash
-docker compose logs -f flink-taskmanager | grep "sink"
+./scripts/run-flink-iceberg-job.sh
 ```
+
+**Watch the output** in a second terminal:
+
+```bash
+docker compose logs -f flink-taskmanager 2>&1 | grep "+I"
+```
+
+**Insert a row** to trigger a real change:
+
+```bash
+docker compose exec -T trino trino --execute \
+  "INSERT INTO iceberg.demo.events VALUES (200, 'new_event', current_timestamp)"
+```
+
+Within ~10 seconds, Flink will detect the new Iceberg snapshot and print the new row:
+
+```
+flink-taskmanager  | +I[200, new_event, 2026-06-24T10:30:00]
+```
+
+**Cancel the job** via the Flink UI at `http://localhost:8081` when done.
 
 ---
 

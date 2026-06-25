@@ -73,6 +73,29 @@ services:
     networks:
       - data-platform
 
+  flink-lib-downloader:
+    image: alpine:latest
+    container_name: flink-lib-downloader
+    volumes:
+      - flink-libs:/libs
+      - flink-hadoop:/hadoop-libs
+    entrypoint: >
+      /bin/sh -c "
+      apk add --no-cache wget &&
+      ([ -f /libs/iceberg-flink-runtime-1.20-1.7.1.jar ] || wget -q -O /libs/iceberg-flink-runtime-1.20-1.7.1.jar 'https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.7.1/iceberg-flink-runtime-1.20-1.7.1.jar') &&
+      ([ -f /libs/iceberg-aws-bundle-1.7.1.jar ] || wget -q -O /libs/iceberg-aws-bundle-1.7.1.jar 'https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.7.1/iceberg-aws-bundle-1.7.1.jar') &&
+      ([ -f /hadoop-libs/hadoop-common-3.3.6.jar ] || wget -q -O /hadoop-libs/hadoop-common-3.3.6.jar 'https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-common/3.3.6/hadoop-common-3.3.6.jar') &&
+      ([ -f /hadoop-libs/hadoop-hdfs-client-3.3.6.jar ] || wget -q -O /hadoop-libs/hadoop-hdfs-client-3.3.6.jar 'https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-hdfs-client/3.3.6/hadoop-hdfs-client-3.3.6.jar') &&
+      ([ -f /hadoop-libs/hadoop-auth-3.3.6.jar ] || wget -q -O /hadoop-libs/hadoop-auth-3.3.6.jar 'https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-auth/3.3.6/hadoop-auth-3.3.6.jar') &&
+      ([ -f /hadoop-libs/hadoop-shaded-guava-1.1.1.jar ] || wget -q -O /hadoop-libs/hadoop-shaded-guava-1.1.1.jar 'https://repo1.maven.org/maven2/org/apache/hadoop/thirdparty/hadoop-shaded-guava/1.1.1/hadoop-shaded-guava-1.1.1.jar') &&
+      ([ -f /hadoop-libs/woodstox-core-6.4.0.jar ] || wget -q -O /hadoop-libs/woodstox-core-6.4.0.jar 'https://repo1.maven.org/maven2/com/fasterxml/woodstox/woodstox-core/6.4.0/woodstox-core-6.4.0.jar') &&
+      ([ -f /hadoop-libs/stax2-api-4.2.1.jar ] || wget -q -O /hadoop-libs/stax2-api-4.2.1.jar 'https://repo1.maven.org/maven2/org/codehaus/woodstox/stax2-api/4.2.1/stax2-api-4.2.1.jar') &&
+      ([ -f /hadoop-libs/commons-configuration2-2.8.0.jar ] || wget -q -O /hadoop-libs/commons-configuration2-2.8.0.jar 'https://repo1.maven.org/maven2/org/apache/commons/commons-configuration2/2.8.0/commons-configuration2-2.8.0.jar') &&
+      echo 'All JARs ready' && ls -lh /libs/ && ls -lh /hadoop-libs/
+      "
+    networks:
+      - data-platform
+
   flink-jobmanager:
     image: flink:1.20.1-scala_2.12-java17
     container_name: flink-jobmanager
@@ -80,19 +103,29 @@ services:
       bash -lc "
       mkdir -p /opt/flink/plugins/s3-fs-hadoop &&
       cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/s3-fs-hadoop/ &&
+      cp /opt/flink-libs/*.jar /opt/flink/lib/ &&
+      cp /opt/flink-hadoop/*.jar /opt/flink/lib/ &&
       /docker-entrypoint.sh jobmanager
       "
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
     ports:
       - "8081:8081"
     volumes:
       - ./config/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/flink/jobs:/opt/flink/jobs:ro
+      - flink-libs:/opt/flink-libs:ro
+      - flink-hadoop:/opt/flink-hadoop:ro
     depends_on:
       minio-init:
         condition: service_completed_successfully
       nessie:
         condition: service_started
+      flink-lib-downloader:
+        condition: service_completed_successfully
     networks:
       - data-platform
 
@@ -103,15 +136,25 @@ services:
       bash -lc "
       mkdir -p /opt/flink/plugins/s3-fs-hadoop &&
       cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/s3-fs-hadoop/ &&
+      cp /opt/flink-libs/*.jar /opt/flink/lib/ &&
+      cp /opt/flink-hadoop/*.jar /opt/flink/lib/ &&
       /docker-entrypoint.sh taskmanager
       "
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
     volumes:
       - ./config/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/flink/jobs:/opt/flink/jobs:ro
+      - flink-libs:/opt/flink-libs:ro
+      - flink-hadoop:/opt/flink-hadoop:ro
     depends_on:
       flink-jobmanager:
         condition: service_started
+      flink-lib-downloader:
+        condition: service_completed_successfully
     networks:
       - data-platform
 
@@ -198,5 +241,7 @@ volumes:
   minio-data:
   nessie-postgres:
   grafana-data:
+  flink-libs:
+  flink-hadoop:
 
 
